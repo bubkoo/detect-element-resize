@@ -149,9 +149,9 @@ define(function (require, exports, module) {
         className = options.className || className;
     };
 
-    exports.addResizeListener = function (element, fn) {
+    exports.addResizeListener = function (element, callback) {
         if (attachEvent) {
-            element.attachEvent('onresize', fn);
+            element.attachEvent('onresize', callback);
         } else {
             var settings = element.__resize__;
             settings || (settings = element.__resize__ = {});
@@ -183,18 +183,18 @@ define(function (require, exports, module) {
                         resetTriggers(element);
                 });
             }
-            settings.handlers.push(fn);
+            settings.handlers.push(callback);
         }
     };
 
-    exports.removeResizeListener = function (element, fn) {
+    exports.removeResizeListener = function (element, callback) {
         if (attachEvent) {
-            element.detachEvent('onresize', fn);
+            element.detachEvent('onresize', callback);
         } else {
             var settings = element.__resize__;
             var handlers = settings.handlers;
             if (handlers) {
-                handlers.splice(handlers.indexOf(fn), 1);
+                handlers.splice(handlers.indexOf(callback), 1);
             }
             if (!handlers.length) {
                 element.removeEventListener('scroll', scrollListener);
