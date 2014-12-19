@@ -7,7 +7,6 @@ define(function (require, exports, module) {
     //  - https://github.com/sdecima/javascript-detect-element-resize
 
     var attachEvent = document.attachEvent;
-    var animationName = 'resizeAnimation';
 
     if (!attachEvent) {
 
@@ -67,7 +66,10 @@ define(function (require, exports, module) {
         }
     }
 
-
+    // 关键帧动画名
+    var animationName = 'resizeAnimation';
+    // trigger 样式名
+    var className = 'resize-trigger';
     var stylesCreated = false;
 
     function createStyles() {
@@ -75,10 +77,17 @@ define(function (require, exports, module) {
             var animationKeyFrames = '@' + keyFramePrefix + 'keyframes ' + animationName + ' { from { opacity: 0; } to { opacity: 0; } } ';
             var animationStyle = keyFramePrefix + 'animation: 1ms ' + animationName + '; ';
 
-            var css = (animationKeyFrames ? animationKeyFrames : '') +
-                '.resize-triggers { ' + (animationStyle ? animationStyle : '') + 'visibility: hidden; opacity: 0; } ' +
-                '.resize-triggers, .resize-triggers > div, .contract-trigger:before { content: \" \"; display: block; position: absolute; top: 0; left: 0; height: 100%; width: 100%; overflow: hidden; }' +
-                '.resize-triggers > div { background: #eee; overflow: auto; } .contract-trigger:before { width: 200%; height: 200%; }';
+            var css = animationKeyFrames ? animationKeyFrames : '';
+
+            css += '.' + className + ' { ' + (animationStyle ? animationStyle : '') + 'visibility: hidden; opacity: 0; } ';
+            css +=
+                '.' + className + ', ' +
+                '.' + className + ' > div, ' +
+                '.' + className + '-contract:before ' +
+                '{ content: \" \"; display: block; position: absolute; top: 0; left: 0; height: 100%; width: 100%; overflow: hidden; }';
+
+            css += '.' + className + ' > div { background: #eee; overflow: auto; } ';
+            css += '.' + className + '-contract:before { width: 200%; height: 200%; }';
 
             var head = document.head || document.getElementsByTagName('head')[0];
             var style = document.createElement('style');
@@ -96,66 +105,85 @@ define(function (require, exports, module) {
     }
 
     function resetTriggers(element) {
-        var triggers = element.__resizeTriggers__,
-            expand = triggers.firstElementChild,
-            contract = triggers.lastElementChild,
-            expandChild = expand.firstElementChild;
+        var triggers = element.__resize__.trigger;
+        var expand = triggers.firstElementChild;
+        var contract = triggers.lastElementChild;
+        var expandChild = expand.firstElementChild;
+
         contract.scrollLeft = contract.scrollWidth;
         contract.scrollTop = contract.scrollHeight;
-        expandChild.style.width = expand.offsetWidth + 1 + 'px';
-        expandChild.style.height = expand.offsetHeight + 1 + 'px';
         expand.scrollLeft = expand.scrollWidth;
         expand.scrollTop = expand.scrollHeight;
+        expandChild.style.width = expand.offsetWidth + 1 + 'px';
+        expandChild.style.height = expand.offsetHeight + 1 + 'px';
     }
 
     function checkSize(element) {
-        return element.offsetWidth != element.__resizeLast__.width ||
-            element.offsetHeight != element.__resizeLast__.height;
+        var size = element.__resize__.size || {};
+        return element.offsetWidth != size.width ||
+            element.offsetHeight != size.height;
     }
 
     function scrollListener(e) {
         var element = this;
-        resetTriggers(this);
-        if (this.__resizeRAF__) {
-            cancelFrame(this.__resizeRAF__);
+        var settings = element.__resize__;
+        resetTriggers(element);
+        if (settings.raf) {
+            cancelFrame(settings.raf);
         }
-        this.__resizeRAF__ = requestFrame(function () {
+        settings.raf = requestFrame(function () {
             if (checkSize(element)) {
-                element.__resizeLast__.width = element.offsetWidth;
-                element.__resizeLast__.height = element.offsetHeight;
-                element.__resizeListeners__.forEach(function (fn) {
+                settings.size.width = element.offsetWidth;
+                settings.size.height = element.offsetHeight;
+                settings.handlers.forEach(function (fn) {
                     fn.call(element, e);
                 });
             }
         });
     }
 
+    // 提供 config 接口，避免关键帧动画名和 css 类名冲突
+    // 在绑定事件之前调用该方法
+    exports.config = function (options) {
+        animationName = options.animationName || animationName;
+        className = options.className || className;
+    };
 
     exports.addResizeListener = function (element, fn) {
         if (attachEvent) {
             element.attachEvent('onresize', fn);
         } else {
-            if (!element.__resizeTriggers__) {
+            var settings = element.__resize__;
+            settings || (settings = element.__resize__ = {});
+            var trigger = settings.trigger;
+
+            if (!trigger) {
                 if (getComputedStyle(element).position == 'static') {
                     element.style.position = 'relative';
                 }
                 createStyles();
-                element.__resizeLast__ = {};
-                element.__resizeListeners__ = [];
-                (element.__resizeTriggers__ = document.createElement('div')).className = 'resize-triggers';
-                element.__resizeTriggers__.innerHTML = '<div class="expand-trigger"><div></div></div>' +
-                    '<div class="contract-trigger"></div>';
-                element.appendChild(element.__resizeTriggers__);
+                settings.handlers = [];
+                settings.size = {};
+
+                // init trigger
+                trigger = document.createElement('div');
+                trigger.className = className;
+                trigger.innerHTML = '' +
+                    '<div class="' + className + '-expand"><div></div></div>' +
+                    '<div class="' + className + '-contract"></div>';
+                settings.trigger = trigger;
+
+                element.appendChild(trigger);
                 resetTriggers(element);
                 element.addEventListener('scroll', scrollListener, true);
 
                 /* Listen for a css animation to detect element display/re-attach */
-                animationStartEvent && element.__resizeTriggers__.addEventListener(animationStartEvent, function (e) {
+                animationStartEvent && trigger.addEventListener(animationStartEvent, function (e) {
                     if (e.animationName == animationName)
                         resetTriggers(element);
                 });
             }
-            element.__resizeListeners__.push(fn);
+            settings.handlers.push(fn);
         }
     };
 
@@ -163,11 +191,16 @@ define(function (require, exports, module) {
         if (attachEvent) {
             element.detachEvent('onresize', fn);
         } else {
-            element.__resizeListeners__.splice(element.__resizeListeners__.indexOf(fn), 1);
-            if (!element.__resizeListeners__.length) {
+            var settings = element.__resize__;
+            var handlers = settings.handlers;
+            if (handlers) {
+                handlers.splice(handlers.indexOf(fn), 1);
+            }
+            if (!handlers.length) {
                 element.removeEventListener('scroll', scrollListener);
-                element.__resizeTriggers__ = !element.removeChild(element.__resizeTriggers__);
+                settings.trigger = !element.removeChild(settings.trigger);
             }
         }
-    }
+    };
+
 });
